@@ -1,0 +1,375 @@
+---
+title: "Iwocatest"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Intial Data preprocessing 
+
+```{r}
+require(knitr)
+calls<-read.csv('calls.csv')
+signups<-read.csv('signups.csv')
+leads<-read.csv('leads.csv')
+
+
+calls$Phone.Number<-as.factor(calls$Phone.Number)
+leads<-read.csv('leads.csv')
+
+
+leads$Phone.Number<-as.factor(leads$Phone.Number)
+kable(summary(calls))
+summary(signups)
+summary(leads)
+```
+
+
+
+#  Questions :
+
+
+
+# Q1 :  Which agent made the most calls ?
+
+
+```{r}
+require(knitr)
+table(calls$Agent)
+```
+
+ Agent Orange had the most calls 
+ 
+ 
+ 
+ 
+# Q2 : For the leads that received one or more calls, how many calls were received on average?
+ 
+
+ 
+```{r}
+require(dplyr)
+
+no_calls<-calls%>%group_by(Phone.Number)%>%count()
+mean(no_calls$n)
+
+```
+ 
+The average no of calls per lead is 1.839
+
+
+
+# Q3:  For the leads that signed up, how many calls were received, on average?
+ 
+```{r}
+#change the data with appropirate names :
+leads<-rename(leads,lead_name=Name)
+signups<-rename(signups,lead_name=Lead)
+leads_signedup<-inner_join(leads,signups,by='lead_name')
+
+calls_signedup<-inner_join(calls,leads_signedup,by="Phone.Number")
+
+# Average number of calls signed up :
+no_calls_signedup<-calls_signedup%>% group_by(Phone.Number)%>%count()
+mean(no_calls_signedup$n)
+```
+
+ The average no of calls who did sign up is 2.1
+ 
+ 
+ 
+#Q4:Which agent had the most signups? Which assumptions did you make? (note that there is a many-to-one relationship between calls and leads)
+ 
+```{r}
+table(calls_signedup$Agent)
+```
+ A simple count of the most no of calls by different agents  who were signed up.
+ * Each agent making multiple calls are given equal wieghting . In reality ,perhaps the final agent was the one who secured the signup
+ * 
+ 
+ 
+ 
+#Q5 :5. Which agent had the most signups per call? 
+
+For each agent ,how many total calls were made and how many signed up :
+
+
+
+```{r}
+# Left join on signed up , so NA's in Outcome represent leads not signed up
+allcalls_info<-left_join(calls,leads_signedup,by='Phone.Number')
+
+
+Signups_per_call<-allcalls_info%>%group_by(Agent)%>%summarise(totalNoofcalls=n(),signedup_calls=sum(!is.na(Approval.Decision)))
+
+Signups_per_call$sign_up_per_call<-(Signups_per_call$signedup_calls)/(Signups_per_call$totalNoofcalls)
+
+Signups_per_call
+```
+
+Agent Blue had the most sign up per call
+
+
+
+#Q6 : Was the variation between the agents’ signups-per-call statistically significant? Why? 
+
+
+  
+  We can use a chisquare-goodness of fit test to compare multiple propotions to expected probabilities.
+  
+ Null Hyopthesis : There is no signifcant difference between the signups per call
+ Alternatove hypothesis : The is a significant difference between the signups per call
+ 
+ Build a propotions table :
+```{r}
+prop_Signups_per_call<-Signups_per_call%>%select(Agent,sign_up_per_call)%>%mutate(proption_signup=sign_up_per_call/sum(sign_up_per_call))
+kable(prop_Signups_per_call)
+
+```
+ 
+ Performing  achisquare test and bootstrapping for a non parametric chi-square test we obtain (assuming equal probabilites between agents ) :
+ 
+```{r}
+
+
+
+chisq.test(prop_Signups_per_call$proption_signup,simulate.p.value = TRUE)
+
+
+```
+ 
+ A chi-square test with p-value 1 , we are unable to reject the null :  There is no significant different between  the signups per call between agents.
+ 
+ 
+ 
+ 
+#Q7 :A lead from which region is most likely to be “interested” in the product? 
+
+
+```{r}
+leads_calls<-inner_join(leads,calls,by="Phone.Number")
+leads_calls%>%filter(Call.Outcome=="INTERESTED")%>%group_by(Region)%>%summarise(counts=n())%>%arrange(counts)
+
+```
+
+ North -west Region has the highest probability of leads being intrested.
+ 
+ 
+#Q8 : A lead from which sector is most likely to be “interested” in the product?
+
+```{r}
+
+leads_calls%>%filter(Call.Outcome=="INTERESTED")%>%group_by(Sector)%>%summarise(counts=n())%>%arrange(counts)
+
+```
+
+ Consultancy 
+ 
+ 
+ 
+#Q9 a:  Given a lead has already expressed interest and signed up,a. signups from which region are most likely to be approved? 
+
+```{r}
+# leads who had signed up 
+leads_signed<-inner_join(signups,leads,by="lead_name")
+#leads who signed up and called :
+
+leads_signed_calls<-inner_join(leads_signed,calls,by="Phone.Number")
+
+# Lead who Expressed intrest
+leads_signed_calls_counts<-leads_signed_calls%>%filter(Call.Outcome=="INTERESTED")%>%group_by(Region)%>%summarise(leads_intretsed_signed=n())%>%arrange(leads_intretsed_signed)
+leads_signed_calls_counts
+
+# Leads who were approved ?
+leads_approved_and_signed<-leads_signed_calls%>%filter(Call.Outcome=="INTERESTED" ,Approval.Decision=="APPROVED")%>%group_by(Region)%>%summarise(leads_intrested_signed_approved=n())
+
+leads_signed_calls_counts<-inner_join(leads_approved_and_signed,leads_signed_calls_counts)
+leads_signed_calls_counts$signed_approved_ratio<-(leads_signed_calls_counts$leads_intrested_signed_approved)/(leads_signed_calls_counts$leads_intretsed_signed)
+
+kable(leads_signed_calls_counts)
+```
+
+North west are more likely to be approved , if they are intrested and signed up
+
+
+
+#Q9 b: Is this statistically significant? Why? 
+
+
+Similar to the chisq test for propotions we can perform a two -way chi_sq test
+
+
+Null Hypothesis : No relation between approved signups and regions 
+
+Alternative Hypothesis: There is a relation 
+Assumingthe probability to make calls betwee each agent is equally probable :
+
+```{r}
+
+df_chi<-leads_signed_calls_counts%>%select(leads_intrested_signed_approved,leads_intretsed_signed)
+chi_results<-chisq.test(df_chi,simulate.p.value = TRUE)
+chi_results
+```
+
+ 
+ p value < 0.05 at 95% CI , hence the result obtained is statistically significant
+ 
+ 
+ 
+ 
+ 
+#Q10a :  Suppose you wanted to pick the 1000 leads most likely to sign up (who have not been called so far), based only on age, sector and region. What criteria would you use to pick those leads? 
+
+
+
+Transform the dataset into signed or non-signed approvals :
+
+```{r}
+
+called_leads<-inner_join(calls,leads)
+#called_leads<-rename(called_leads,lead_name=Name)
+#signups<-rename(signups,lead_name=Lead)
+signed_from_called<-left_join(called_leads,signups)
+#Signed_or_not_signed_data<-signed_from_called%>%mutate(signed_or_not=ifelse(is.na(Approval.Decision),0,1))
+Signed_or_not_signed_data<-signed_from_called%>%select(Age,Sector,Region,Approval.Decision)
+head(Signed_or_not_signed_data)
+```
+
+
+
+We want to find the highest probabilities for each criteria in Age ,sector and Region and see if these categories are statistically significant, we can then use Bayes rule to work out the likelihood of a single signup given these conditions.
+
+First for the ease of use , we can categorise the Age Variable 
+
+```{r}
+require(data.table)
+agebreaks <- c(0,1,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,100,500)
+agelabels <- c("0-1","1-4","5-9","10-14","15-19","20-24","25-29","30-34",
+               "35-39","40-44","45-49","50-54","55-59","60-64","65-69",
+               "70-74","75-79","80-84","85-100","100+")
+
+leads_age<-setDT(Signed_or_not_signed_data)[ , agegroups := cut(Signed_or_not_signed_data$Age, 
+                                breaks = agebreaks, 
+                                right = FALSE, 
+  
+                                
+                                                      labels = agelabels)]
+
+barplot(table(leads_age$agegroups))
+```
+
+
+Age-group 20-24 has the largest probability , we can compute its probabilty , we discard ages >100 before computing probabilties considering them as outliers
+
+```{r}
+
+leads_age<-leads_age%>%select(agegroups,Sector,Region,Approval.Decision)
+summary(leads_age)
+```
+
+Find  the age group which has the highest probability of getting signed :
+
+```{r}
+leads_age<-leads_age%>%filter(agegroups!="100+")
+
+##  For each age group , total calls and calls signed up 
+
+leads_age%>%group_by(agegroups)%>%summarise(Total=n(),signed=sum(!is.na(Approval.Decision)),prob_signed=signed/Total)%>%arrange(desc(prob_signed))
+
+```
+Age group "70-74" has the highest probabilty of getting signed for any given category.
+
+
+
+
+
+
+Find the sector which has the highest probability of getting signed :
+
+
+```{r}
+
+leads_age%>%group_by(Sector)%>%summarise(Total=n(),signed=sum(!is.na(Approval.Decision)),prob_signed=signed/Total)%>%arrange(desc(prob_signed))
+```
+
+Whole sale with the highest probabilty of 0.41 getting signed for a lead
+
+
+
+Find the region which has the highest probability of getting signed :
+
+```{r}
+leads_age%>%group_by(Region)%>%summarise(Total=n(),signed=sum(!is.na(Approval.Decision)),prob_signed=signed/Total)%>%arrange(desc(prob_signed))
+```
+
+South-West region has the highest probability of getting signed with 0.41
+
+
+
+#Q10 b: In what sense are those an optimal criteria set? 
+
+The likelihood of obtaining a signup is the maximal on each of these criteria
+
+
+#Q10c:How many signups would you expect to get based on those called leads, assuming they were being called by random agents?
+
+
+
+We can use Bayesrule to work out :
+P(signup=Yes|Age=70-74,Sector=wholesale,Region=SouthWest)= R/(R+~R)
+
+where R = P(age=70-74|yes)*P(sector=wholesale|yes)*P(Region=Southwest|yes) * P(singed=Yes)
+ ~R = P(age=70-74|no)*P(sector=wholesale|no)*P(Region=Southwest|no) * P(singed=no)
+
+
+We can compute probabilites for each :
+P (age=70-74|yes)
+P(age=70-74|no)
+
+```{r}
+#count  age 70-74 with yes (signed)
+
+
+
+
+
+age70_signed<-leads_age%>%filter(agegroups=="70-74",!is.na(Approval.Decision))%>%summarise(nooof70=n())
+
+age70_not_signed<-leads_age%>%filter(agegroups=="70-74",is.na(Approval.Decision))%>%summarise(nooof70=n())
+
+
+#count total yeses
+total_yes<-leads_age%>%filter(!is.na(Approval.Decision))%>%summarise(totalyes=n())
+
+#count total nos
+total_nos<-leads_age%>%filter(is.na(Approval.Decision))%>%summarise(totalno=n())
+
+p_age_signed<-age70_signed/total_yes
+p_age_not_signed<-age70_not_signed/total_nos
+
+probs_age<-list("p(age 70-74| notsigned)"= p_age_not_signed,'p(age 70-74| signed)'= p_age_signed)
+probs_age
+```
+
+
+Similary we work out probailites for P(Region=Southwest|yes) ,P(Sector|yes)
+
+
+
+
+
+
+
+
+
+
+
+ 
+ 
+
+ 
+ 
